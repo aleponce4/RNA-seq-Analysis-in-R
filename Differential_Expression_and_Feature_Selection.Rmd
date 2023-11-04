@@ -1,0 +1,730 @@
+---
+title: "RNA-Seq Analysis in Early-Stage Lung Adenocarcinoma"
+author: "Your Name"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  html_notebook:
+    toc: true
+    toc_float: true
+    code_folding: "hide"
+    theme: united
+    highlight: tango
+---
+
+# Introduction
+
+Lung adenocarcinoma, a primary form of non-small cell lung cancer (NSCLC), presents significant challenges in treatment and prognosis.
+This study focuses on early-stage lung adenocarcinoma, particularly examining the transcriptome of tumor-adjacent lung tissue.
+The ability to predict recurrence post-surgery is crucial for patient management and therapy customization.
+This project aims to identify gene expression patterns and potential biomarkers in tumor-adjacent lung tissue that correlate with recurrence risk.
+
+## Purpose
+
+Exploratory analysis of gene expression data to identify potential biomarkers .
+This includes:
+
+1.  **Differential Expression Analysis:** Utilizing the DESeq2 package to identify genes that show significant differences in expression between [Normal and Tumor tissue], which serves as the foundation for downstream analyses.
+
+2.  **Data Visualization:** Generating heatmaps and volcano plots to visually inspect and highlight differentially expressed genes (DEGs) and to understand the overall expression patterns and potential significance of these genes.
+
+3.  **Statistical Testing:** Conducting t-tests to confirm the robustness of the DEGs identified by DESeq2 and to ensure statistical validity of the findings.
+
+4.  **Clustering Analysis:** Implementing hierarchical clustering to discover patterns and groupings in the data that may indicate coordinated gene expression changes, and performing k-means clustering to categorize genes into distinct clusters based on their expression profiles.
+
+5.  **Dimensionality Reduction:** Applying principal component analysis (PCA) to reduce the complexity of the data and to identify the main sources of variance in gene expression.
+
+6.  **Feature Selection:** Using a random forest classifier to further refine the list of genes by importance in distinguishing between [conditions/groups/tissues/etc.], aiming to pinpoint the most informative biomarkers.
+
+7.  **Preparation for Further Analysis:** Compiling a curated list of candidate genes for subsequent in-depth analysis, which will be carried out in separate notebooks focusing on annotation, pathway analysis, and functional enrichment.
+
+## Data Description
+
+-   **Accession Numbers:** PRJNA955664; GEO: GSE229705
+-   **Source:** The data, in the form of count matrices, were obtained from the NCBI Sequence Read Archive (SRA) and Gene Expression Omnibus (GEO).
+-   **Sample Details:**
+    -   Total Samples: 150 early-stage lung adenocarcinoma patients
+    -   Sample Types: Matched tumor and normal lung tissue samples
+
+## **Pipeline Overview**
+
+1.  **Data Preprocessing:**
+
+    -   Normalization of read counts using the DESeq2 package.
+
+    -   Filtering of lowly expressed genes to enhance the robustness of subsequent analyses.
+
+2.  **Differential Expression Analysis:**
+
+    -   Utilization of DESeq2 for identifying differentially expressed genes (DEGs) across different conditions or comparisons.
+
+    -   Summarization of results with a focus on statistically significant DEGs.
+
+3.  **Data Visualization:**
+
+    -   Generation of heatmaps to visualize the expression patterns of DEGs.
+
+    -   Creation of volcano plots to graphically represent the relationship between fold-changes and statistical significance.
+
+4.  **Statistical Validation:**
+
+    -   Application of t-tests as a complementary approach to validate the DEGs identified by DESeq2.
+
+    -   Correction for multiple hypothesis testing where applicable.
+
+5.  **Clustering Analyses:**
+
+    -   Hierarchical clustering to identify patterns in gene expression and to group similar expression profiles.
+
+    -   K-means clustering to categorize genes into discrete clusters based on expression levels.
+
+6.  **Dimensionality Reduction and Feature Extraction:**
+
+    -   Performance of principal component analysis (PCA) to simplify the dataset and highlight the most variable genes.
+
+    -   Use of random forest classification to identify the most important features (genes) for group classification.
+
+7.  **Compilation of Results:**
+
+    -   Aggregation of top genes from PCA, random forest, and clustering analyses into a consolidated list for downstream analysis.
+
+8.  **Export of Results:**
+
+    -   Preparation of a final list of candidate genes for further analysis in separate, specialized notebooks.
+
+    -   Exportation of key findings and gene lists in CSV format for reproducibility and sharing.
+
+### Load all required libraries
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(tximport)
+library(DESeq2)
+library(rhdf5)
+library(pheatmap)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(readr)
+library(xml2)
+library(tidyverse)
+library(dendextend)
+library(ggplot2)
+library(factoextra)
+library(FactoMineR)
+library(cluster)
+library(randomForest)
+library(caret)
+library(UBL)
+```
+
+# **Data Acquisition**
+
+**Loading the Raw Counts**
+
+```{r}
+# Reading the raw counts file
+counts_data <- read.csv(gzfile("Data/GSE229705_counts-raw.csv.gz"), header = TRUE)
+
+```
+
+**Loading metadata**
+
+```{r}
+# Reading the SDRF file
+sra_run_table <- read.csv("Data/SraRunTable.txt", sep = ",", header = TRUE)
+
+# selecting specific columns
+metadata <- sra_run_table[, c("patient", "progression_type", "tissue", "recurrence")]
+
+# Append tumor nor Normal to patient ID
+metadata$PatientID <- ifelse(metadata$tissue == "Tumor", 
+                             paste0(metadata$patient, ".T"), 
+                             paste0(metadata$patient, ".N"))
+
+```
+
+Prepare and match column names
+
+```{r}
+# Extract patient IDs from the last column of metadata
+patient_ids <- metadata[,ncol(metadata)]
+
+# Remove the last column from metadata
+metadata <- metadata[,-ncol(metadata)]
+
+# Convert to a dataframe and set row names to patient IDs
+metadata_df <- as.data.frame(metadata, stringsAsFactors = FALSE)
+rownames(metadata_df) <- patient_ids
+
+```
+
+Filter out genes with low expression
+
+```{r}
+# Count the total number of genes before filtering
+total_genes_before <- nrow(counts_data)
+print(paste("Number of genes before filtering:", total_genes_before))
+
+# Set the threshold for filtering
+threshold <- round(0.3 * ncol(counts_data))  # 30% of the total number of samples
+
+# Apply the filtering criteria, excluding the first column (gene identifiers)
+keep <- rowSums(counts_data[, -1] > 1) >= threshold # threshold of 1
+filtered_counts_data <- counts_data[keep,]
+
+# Count the total number of genes after filtering
+total_genes_after <- nrow(filtered_counts_data)
+print(paste("Number of genes after filtering:", total_genes_after))
+
+```
+
+Filter out mismatched names, reorder data
+
+```{r}
+# Get sample names from counts data, excluding the gene identifier column
+sample_names_counts <- colnames(filtered_counts_data)[-1]
+
+# Find common samples between counts data and metadata
+common_samples <- intersect(sample_names_counts, rownames(metadata_df))
+
+# Subsetting and reordering counts data to include gene identifiers and common samples
+filtered_counts_data <- filtered_counts_data[, c(1, match(common_samples, sample_names_counts) + 1)]
+
+# Reordering metadata to match the order of common samples
+metadata_df <- metadata_df[match(common_samples, rownames(metadata_df)), ]
+
+# Check alignment excluding the gene identifier column
+all(rownames(metadata_df) == colnames(filtered_counts_data)[-1])
+
+```
+
+Create DESeq2 object
+
+```{r}
+
+# Replace 'Lung adjacent normal' with 'normal' in the tissue column
+metadata_df$tissue <- gsub("Lung adjacent normal", "normal", metadata_df$tissue)
+
+# convert the 'tissue' column to a factor
+metadata_df$tissue <- as.factor(metadata_df$tissue)
+
+# Set Gene IDs as Row Names
+rownames(filtered_counts_data) <- filtered_counts_data[, 1]
+# Then remove this column from the data
+filtered_counts_data <- filtered_counts_data[, -1]
+
+# create the DESeq2 object
+dds <- DESeqDataSetFromMatrix(countData = filtered_counts_data, colData = metadata_df, design = ~ tissue)
+
+```
+
+# Differential Expression Analysis
+
+Differential Expression Analysis
+
+```{r}
+dds <- DESeq(dds)
+```
+
+Extract results
+
+```{r}
+res <- results(dds, name = "tissue_Tumor_vs_normal")
+```
+
+#### Volcano Plot
+
+```{r}
+# Volcano plot 
+with(res, plot(log2FoldChange, -log10(pvalue), pch=20, main="Volcano plot", cex=0.5))
+
+# Add blue points: significant genes 
+with(subset(res, padj < 0.01), points(log2FoldChange, -log10(pvalue), pch=20, col="blue", cex=0.5))
+
+# Add red points: significant  and large fold change (|log2FC| > 2)
+with(subset(res, padj < 0.01 & abs(log2FoldChange) > 2), points(log2FoldChange, -log10(pvalue), pch=20, col="red", cex=0.5))
+```
+
+#### Heat-map
+
+```{r}
+# Extract the normalized counts for these genes
+normalized_counts <- counts(dds, normalized=TRUE)
+
+# Order the results by p-value
+res_ordered <- res[order(res$pvalue), ]
+
+# Select top N significant genes for the heatmap
+top_n <- 50  # Adjust this number as needed
+top_genes <- rownames(res_ordered)[1:top_n]
+
+# Extract normalized counts for these genes
+top_genes_data <- log2(normalized_counts[top_genes, ] + 1)
+
+# Prepare sample annotations
+sample_annotations <- metadata_df[, c("tissue", "recurrence")]
+sample_annotations$recurrence[sample_annotations$recurrence == ""] <- "Unknown"  # Handle empty strings
+sample_annotations$recurrence <- factor(sample_annotations$recurrence)
+sample_annotations$tissue <- factor(sample_annotations$tissue)
+
+# Ensure the order of samples in annotations matches the order in the data
+sample_annotations_heatmap <- sample_annotations[colnames(top_genes_data), ]
+rownames(sample_annotations_heatmap) <- colnames(top_genes_data)  # Adjust row names
+
+# Apply min-max scaling to the data
+scaled_data <- apply(top_genes_data, 1, function(x) (x - min(x)) / (max(x) - min(x)))
+
+# Define color breaks
+breaks <- seq(0, 1, length.out = 100)
+
+# Draw the heatmap with row annotations
+pheatmap(scaled_data, cluster_rows = TRUE, cluster_cols = TRUE,
+         annotation_row = sample_annotations_heatmap,
+         show_rownames = FALSE, show_colnames = FALSE,
+         color = colorRampPalette(c("blue", "white", "red"))(100),
+         breaks = breaks,
+         main = "Top 50 Genes")  # Add this line for the title
+
+
+
+```
+
+# 
+
+# **T-test**
+
+#### Perform t test
+
+```{r}
+# Extract expression data 
+expression_data <- counts(dds, normalized=TRUE)
+
+# Initialize a vector to store p-values
+p_values <- numeric(nrow(expression_data))
+tissue_types <- metadata_df$tissue
+
+# Perform t-tests for each gene
+for (i in 1:nrow(expression_data)) {
+    gene_data <- expression_data[i, ]
+    if (length(unique(gene_data[tissue_types == "normal"])) > 1 && 
+        length(unique(gene_data[tissue_types == "Tumor"])) > 1) {
+        p_values[i] <- t.test(gene_data[tissue_types == "normal"], 
+                              gene_data[tissue_types == "Tumor"])$p.value
+    } else {
+        p_values[i] <- NA  # Assign NA if the test cannot be performed
+    }
+}
+
+# Apply Benjamini-Hochberg correction
+p_adjusted <- p.adjust(p_values, method = "BH")
+
+# Define p-value threshold
+pvalue_threshold <- 0.05
+
+# Find significant genes before and after correction
+significant_genes_before_correction <- rownames(expression_data)[!is.na(p_values) & p_values < pvalue_threshold]
+significant_genes_after_correction <- rownames(expression_data)[!is.na(p_adjusted) & p_adjusted < pvalue_threshold]
+
+# Outputting the results
+cat("Total Number of Significant Genes Before Correction:", length(significant_genes_before_correction), "\n")
+cat("Total Number of Significant Genes After Correction:", length(significant_genes_after_correction), "\n")
+
+
+
+```
+
+#### Summary table
+
+```{r}
+# DESeq2 results - count the number of significant genes
+significant_genes_deseq2 <- sum(res$padj < 0.05, na.rm = TRUE)
+
+# Create a data frame for the summary
+summary_table <- data.frame(
+  Method = c("T-test (Before Correction)", "T-test (After Correction)", "DESeq2"),
+  SignificantGenes = c(
+    length(significant_genes_before_correction),  # Number of significant genes from t-test before correction
+    length(significant_genes_after_correction),   # Number of significant genes from t-test after correction
+    significant_genes_deseq2                      # Number of significant genes from DESeq2
+  )
+)
+
+# Print the summary table
+print(summary_table)
+
+```
+
+# Hierarchical​ ​clustering
+
+#### Compute clusters
+
+```{r}
+
+# Subset expression_data to include only top 5k significant genes
+top_genes <- head(res_ordered[!is.na(res_ordered$padj) & res_ordered$padj < 0.05, ], 10000)
+top_gene_names <- rownames(top_genes)
+significant_expression_data <- expression_data[top_gene_names, ]
+
+# Clustering significant genes
+gene_dist <- dist(t(significant_expression_data))
+gene_hclust <- hclust(gene_dist, method = "complete")
+
+# Clustering samples
+sample_dist <- dist(significant_expression_data)
+sample_hclust <- hclust(sample_dist, method = "complete")
+
+# Check the number of items that were clustered
+cat("Number of samples clustered:", length(gene_hclust$order), "\n")
+cat("Number of genes clustered:", length(sample_hclust$order), "\n")
+
+```
+
+#### Plot sample dendogram
+
+```{r fig.width=10}
+# 1. Plot sample dendogram
+# Convert hclust object into a dendrogram
+gene_dend <- as.dendrogram(gene_hclust)
+# Get the order of samples from the dendrogram
+dend_order <- order.dendrogram(gene_dend)
+# align colors
+sample_annotations_ordered <- sample_annotations[colnames(expression_data),]
+tissue_colors <- ifelse(sample_annotations_ordered$tissue == "normal", "blue", "red")
+aligned_colors <- tissue_colors[dend_order]
+# Assign colors to the labels of the dendrogram
+labels_colors(gene_dend) <- aligned_colors
+# replace the labels with a symbol
+labels(gene_dend) <- rep("|", length(labels(gene_dend)))
+plot(gene_dend, main="Hierarchical Clustering - Samples", xlab="")
+# Add a legend below the plot
+legend("right", legend=c("Normal", "Tumor"), fill=c("blue", "red"), horiz=TRUE, xpd=TRUE, inset=c(0.05,-0.5))
+
+```
+
+#### Plot gene dendogram
+
+```{r fig.width=10, message=FALSE, warning=FALSE}
+
+# 2. Plot the gene dendrogram
+# Calculate the distance matrix for rows (genes)
+gene_dist <- dist(t(significant_expression_data))
+
+# Perform hierarchical clustering on the original distances
+gene_hclust <- hclust(gene_dist, method = "complete")
+
+# Log-transform the distances to potentially spread out the leaf nodes in the dendrogram
+log_gene_dist <- log1p(gene_dist)  # log1p is used to avoid log(0) issues
+
+# Perform hierarchical clustering on the log-transformed distances
+log_gene_hclust <- hclust(log_gene_dist, method = "complete")
+
+# Plot the dendrogram for gene clustering with adjusted linewidth
+plot(log_gene_hclust, main="Hierarchical Clustering - top 5k Genes (Log-transformed)", sub="", xlab="", labels = FALSE, lwd = 0.3)
+
+# Add rectangles to indicate clusters on the log-transformed dendrogram
+rect.hclust(log_gene_hclust, k = 5, border = 2:4)  # Choose k based on how many clusters
+
+
+```
+
+# PCA
+
+#### PCA based on Tumor vs Normal
+
+```{r}
+# Extract the 'tissue' column from sample_annotations_ordered to use as a factor
+tissue_factor <- factor(sample_annotations_ordered$tissue, levels = c("normal", "tumor"))
+
+# Transpose the data to have samples as rows
+transposed_data <- t(significant_expression_data)
+
+# Scale the transposed data
+scaled_transposed_data <- scale(transposed_data)
+
+# Perform PCA
+pca_res <- PCA(scaled_transposed_data, graph = FALSE)
+
+# Visualize PCA with clusters and tissue type
+fviz_pca_ind(pca_res, 
+             label = "none", # hide labels
+             habillage = sample_annotations_ordered$tissue, # color by tissue type
+             addEllipses = TRUE, # add confidence ellipses around clusters
+             palette = c("#00AFBB", "#FC4E07"), # specify colors for normal and tumor
+             title = "PCA of Gene Expression Data"
+)
+
+```
+
+#### Identify genes that contribute most to separation
+
+```{r}
+# get loadings
+loadings <- pca_res$var$coord
+
+# Identify the genes contributing most to PC1
+pc1_loadings <- loadings[, 1] # First principal component loadings
+top_pc1_genes <- names(sort(abs(pc1_loadings), decreasing = TRUE))[1:100] # Top 100 genes for PC1
+
+```
+
+# K-means clustering
+
+#### Cluster samples based on gene expression
+
+Determine Optimal Number of Clusters
+
+```{r}
+# Scale data
+scaled_significant_expression_data <- scale(significant_expression_data)
+
+# Elbow method using fviz_nbclust from the factoextra package
+set.seed(123)  # for reproducibility
+fviz_nbclust(scaled_significant_expression_data, kmeans, method = "wss") +
+  labs(subtitle = "Elbow method")
+
+
+```
+
+K-Clustering using 4 clusters
+
+```{r}
+# Perform k-means clustering with k = 5
+set.seed(123) # Set seed for reproducibility
+kmeans_result <- kmeans(scaled_significant_expression_data , centers = 5, nstart = 25)
+
+# Check the within-cluster sum of squares
+cat("Total within-cluster sum of squares:", kmeans_result$tot.withinss, "\n")
+
+# Evaluate the cluster sizes
+cat("Cluster sizes:", table(kmeans_result$cluster), "\n")
+
+```
+
+#### Plot Clusters
+
+```{r}
+# Visualize the clusters
+fviz_cluster(kmeans_result, data = scaled_significant_expression_data, main = "K-means Clusters", geom="point")
+
+```
+
+#### Saving cluster assignments
+
+```{r}
+# Create a data frame with gene names and their corresponding cluster assignments
+gene_clusters <- data.frame(Gene = rownames(significant_expression_data), 
+                            Cluster = kmeans_result$cluster)
+```
+
+# Random Forest
+
+#### Prepare data
+
+```{r}
+
+# Filter out "Unknown" recurrence and only keep "Tumor" samples
+filter_indices <- sample_annotations_ordered$tissue == "Tumor" & 
+                  sample_annotations_ordered$recurrence != "Unknown"
+
+tumor_data <- significant_expression_data[, filter_indices]
+recurrence_status <- factor(sample_annotations_ordered$recurrence[filter_indices])
+
+# Verify if the number of columns in tumor_data matches the number of rows in recurrence_status
+if (ncol(tumor_data) != length(recurrence_status)) {
+    stop("Mismatch in the number of columns in tumor_data and length of recurrence_status")
+}
+
+# Convert your data into a data frame where the last column is the target variable
+data_for_smote <- as.data.frame(t(tumor_data))  # transpose tumor_data to match samples as rows
+data_for_smote$recurrence_status <- recurrence_status
+
+# Check the balance of the dataset
+table(data_for_smote$recurrence_status)
+
+```
+
+#### Use SMOTE to correct sample Imbalance
+
+```{r}
+# Apply over-sampling using UBL
+smote_data <- SmoteClassif(recurrence_status ~ ., 
+                           dat = data_for_smote, 
+                           C.perc = list("No Progression (>5y)" = 1, "Recurrence" = 3), 
+                           k = 5, repl = FALSE,
+                           dist = "Euclidean", p = 2)
+
+# Now check the balance of the new dataset
+table(smote_data$recurrence_status)
+
+```
+
+#### Split into Train/Test sets
+
+```{r}
+
+# Split the balanced data into features and target
+tumor_data_smote <- smote_data[, -ncol(smote_data)]
+recurrence_status_smote <- smote_data[, ncol(smote_data)]
+recurrence_status_smote <- factor(recurrence_status_smote)
+
+# Split the balanced data into training and testing sets
+set.seed(123)  # for reproducibility
+# Create trainIndex
+trainIndex <- createDataPartition(recurrence_status_smote, p = 0.8, list = FALSE, times = 1)
+# ubset the rows for the training set
+data_train <- tumor_data_smote[trainIndex, ]
+# subset the rows for the testing set
+data_test <- tumor_data_smote[-trainIndex, ]
+# subset the recurrence_status for training and testing
+recurrence_train <- recurrence_status_smote[trainIndex]
+recurrence_test <- recurrence_status_smote[-trainIndex]
+```
+
+#### Train and test model
+
+```{r}
+# Check the structure of the transposed data_train
+rf_model <- randomForest(x = data_train, y = recurrence_train, 
+                         ntree = 200,  # adjust the number of trees
+                         keep.forest=TRUE, 
+                         importance=TRUE, 
+                         do.trace=10,  # reports OOB error
+                         keep.inbag=TRUE)
+
+# Plot OOB error with the updated model
+oob_error <- rf_model$err.rate[, 1]  # OOB error for classification
+ntrees <- 1:length(oob_error)
+plot(ntrees, oob_error, type="l", xlab="Number of Trees", ylab="OOB Error Rate", main="OOB Error Rate vs. Number of Trees")
+
+
+
+```
+
+#### Model Performance
+
+```{r}
+# Assuming that your random forest model is named 'rf_model' and you have 'data_test' and 'recurrence_test' ready
+test_pred <- predict(rf_model, newdata = data_test)
+conf_matrix <- table(Predicted = test_pred, Actual = recurrence_test)
+
+# Calculate accuracy
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+
+# Calculate sensitivity (recall) for class 'Recurrence'
+sensitivity <- conf_matrix[2, 2] / sum(conf_matrix[2, ])
+
+# Calculate specificity for class 'No Progression'
+specificity <- conf_matrix[1, 1] / sum(conf_matrix[1, ])
+
+# Precision (Positive Predictive Value) for class 'Recurrence'
+precision <- conf_matrix[2, 2] / sum(conf_matrix[, 2])
+
+# F1 Score for class 'Recurrence'
+f1_score <- 2 * (precision * sensitivity) / (precision + sensitivity)
+
+# Compile the metrics into a data frame for nice tabular format
+performance_table <- data.frame(
+  Accuracy = accuracy,
+  Sensitivity = sensitivity,
+  Specificity = specificity,
+  Precision = precision,
+  F1_Score = f1_score
+)
+
+# Print the table
+print(performance_table)
+```
+
+#### Get top genes
+
+```{r}
+
+# Get importance scores
+importance_scores <- importance(rf_model, type=1)  # type=1 for MeanDecreaseGini by default
+
+# Convert to a data frame
+importance_df <- data.frame(Gene=rownames(importance_scores), Importance=importance_scores[, 1])
+
+# Sort by importance
+importance_df_sorted <- importance_df[order(-importance_df$Importance), ]
+
+# Extract the top genes
+top_forest_genes <- head(importance_df_sorted, 100)
+
+```
+
+# Selected genes for annotation
+
+```{r}
+
+# Create a new dataframe with random forest and PCA genes
+top_genes_df <- data.frame(
+  PCA_Genes = c(top_pc1_genes, rep(NA, max_length - length(top_pc1_genes))),
+  Forest_Genes = c(top_forest_genes, rep(NA, max_length - length(top_forest_genes)))
+)
+
+# K-means clusters genes
+# Subset the data for clusters 2, 4, and 5
+cluster_2 <- subset(gene_clusters, Cluster == 2)$Gene
+cluster_4 <- subset(gene_clusters, Cluster == 4)$Gene
+cluster_5 <- subset(gene_clusters, Cluster == 5)$Gene
+
+# Make all vectors the same length (fill with NA for shorter ones)
+cluster_2 <- c(cluster_2, rep(NA, max_length - length(cluster_2)))
+cluster_4 <- c(cluster_4, rep(NA, max_length - length(cluster_4)))
+cluster_5 <- c(cluster_5, rep(NA, max_length - length(cluster_5)))
+
+# Add new columns to the dataframe
+top_genes_df$K_Means_Cluster_2 <- cluster_2
+top_genes_df$K_Means_Cluster_4 <- cluster_4
+top_genes_df$K_Means_Cluster_5 <- cluster_5
+
+# remove rows with all NAs 
+top_genes_df <- top_genes_df[rowSums(is.na(top_genes_df)) < ncol(top_genes_df), ]
+
+
+write.csv(top_genes_df, file = "Data/top_genes_df.csv", row.names = FALSE)
+
+```
+
+#### Inspect Fold Change of selected genes
+
+```{r}
+# Combine all genes from all columns into one vector
+all_genes <- unique(c(
+  top_genes_df$PCA_Genes, 
+  top_genes_df$Forest_Genes
+))
+
+# Remove NAs and get the unique genes
+unique_genes <- unique(na.omit(all_genes))
+
+# Define your colors for different criteria
+color_significant <- "#00AFBB"  
+color_large_change <- "#FC4E07"  
+color_unique_genes <- "#9B59B6"    
+
+# Make a volcano plot with all the genes
+with(res, plot(log2FoldChange, -log10(pvalue), pch=20, main="Volcano plot", cex=0.5, xlab="Log2 Fold Change", ylab="-Log10 P-value"))
+
+# Highlight significant genes
+with(subset(res, padj < 0.05), points(log2FoldChange, -log10(pvalue), pch=20, col=color_significant, cex=0.5))
+
+# Highlight significant genes with large fold changes
+with(subset(res, padj < 0.05 & abs(log2FoldChange) > 2), points(log2FoldChange, -log10(pvalue), pch=20, col=color_large_change, cex=0.5))
+
+# Highlight unique genes
+unique_genes_in_res <- res[rownames(res) %in% unique_genes, ]
+with(unique_genes_in_res, points(log2FoldChange, -log10(pvalue), pch=20, col=color_unique_genes, cex=0.5))
+
+# Add a legend to the plot
+legend("topright", 
+       legend=c("Significant Genes", "Large Fold Change", "Selected Genes"),
+       col=c(color_significant, color_large_change, color_unique_genes),
+       pch=20, 
+       cex=0.8)
+
+
+```
+
+# References
+
+1.  Dolgalev I, Zhou H, Shenker-Tauris N, Le H, Sakellaropoulos T, Coudray N, Zhu K, Vasudevaraja V, Yeaton A, Goparaju CV, Li Y, Sulaiman I, Tsay JCJ, Meyn P, Mohamed H, Sydney I, Ramaswami S, Narula N, Kulicke R, Davis FP, Stransky N, Smolen GA, Cheng WY, Cai J, Punekar S, Velcheti V, Poirier JT, Neel B, Wong KK, Chiriboga L, Heguy A, Papagiannakopoulos T, Snuderl M, Segal LN, Moreira AL, Pass HI, Tsirigos A. Inflammation in the tumor-adjacent lung as a predictor of clinical outcome in lung adenocarcinoma. bioRxiv. 2022 Nov 10. doi: <https://doi.org/10.1101/2022.11.10.516003>. Preprint.
