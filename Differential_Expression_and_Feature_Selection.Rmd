@@ -658,33 +658,32 @@ top_forest_genes <- head(importance_df_sorted, 200)
 
 ```{r}
 
-# Determine the maximum length among all gene lists
-max_length <- max(length(top_pc1_genes), length(top_forest_genes$Gene),
-                  length(cluster_2), length(cluster_4), length(cluster_5))
 
-# Create individual lists for PCA genes and Forest genes, extending them with NAs to match the longest list
-pca_genes_extended <- c(top_pc1_genes, rep(NA, max_length - length(top_pc1_genes)))
-forest_genes_extended <- c(top_forest_genes$Gene, rep(NA, max_length - length(top_forest_genes$Gene)))
+# Filter genes for each cluster
+cluster_2_genes <- gene_clusters$Gene[gene_clusters$Cluster == 2]
+cluster_4_genes <- gene_clusters$Gene[gene_clusters$Cluster == 4]
+cluster_5_genes <- gene_clusters$Gene[gene_clusters$Cluster == 5]
 
-# Extend K-means clusters with NAs
-cluster_2_extended <- c(cluster_2, rep(NA, max_length - length(cluster_2)))
-cluster_4_extended <- c(cluster_4, rep(NA, max_length - length(cluster_4)))
-cluster_5_extended <- c(cluster_5, rep(NA, max_length - length(cluster_5)))
+# Find the maximum length among these lists
+max_length <- max(length(cluster_2_genes), length(cluster_4_genes), length(cluster_5_genes))
 
-# Create the final dataframe
-top_genes_df <- data.frame(
-  PCA_Genes = pca_genes_extended,
-  Forest_Genes = forest_genes_extended,
-  K_Means_Cluster_2 = cluster_2_extended,
-  K_Means_Cluster_4 = cluster_4_extended,
-  K_Means_Cluster_5 = cluster_5_extended
+# Extend each list to the maximum length
+cluster_2_extended <- c(cluster_2_genes, rep(NA, max_length - length(cluster_2_genes)))
+cluster_4_extended <- c(cluster_4_genes, rep(NA, max_length - length(cluster_4_genes)))
+cluster_5_extended <- c(cluster_5_genes, rep(NA, max_length - length(cluster_5_genes)))
+
+# Create a dataframe with these lists as columns
+clusters_df <- data.frame(
+  Cluster_2 = cluster_2_extended,
+  Cluster_4 = cluster_4_extended,
+  Cluster_5 = cluster_5_extended
 )
 
-# Remove rows where all elements are NA
-top_genes_df <- top_genes_df[rowSums(is.na(top_genes_df)) < ncol(top_genes_df), ]
+# remove rows where all elements are NA
+clusters_df <- clusters_df[rowSums(is.na(clusters_df)) < ncol(clusters_df), ]
 
 # Save the dataframe to a CSV file
-write.csv(top_genes_df, file = "Data/top_genes_df.csv", row.names = FALSE)
+write.csv(clusters_df, file = "Data/clusters_genes_df.csv", row.names = FALSE)
 
 
 ```
