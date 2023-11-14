@@ -123,31 +123,31 @@ This project relies on several R packages, organized here by their primary purpo
 
 **Hierarchical Clustering Dendrogram**
 This dendrogram shows the results of hierarchical clustering, illustrating how genes group together based on their expression profiles.
-![Hierarchical Clustering Dendrogram](plot/dendogram.png)
+![Hierarchical Clustering Dendrogram](Plots/dendogram.png)
 
 **Initial Heatmap of DESeq2 Results**
 The heatmap visualizes expression levels across genes and samples, highlighting patterns and differences in gene expression.
-![Initial Heatmap of DESeq2 Results](plot/heatmap.png)
+![Initial Heatmap of DESeq2 Results](Plots/heatmap.png)
 
 **Elbow Method for Determining Optimal Number of Clusters**
 This plot helps in determining the optimal number of clusters for K-means clustering by showing the variance explained by each number of clusters.
-![Elbow Method for Determining Optimal Number of Clusters](plot/elbow.png)
+![Elbow Method for Determining Optimal Number of Clusters](Plots/elbow.png)
 
 **OOB Error Plot for Optimal Number of Trees in Random Forest**
 The Out-of-Bag (OOB) error plot indicates the optimal number of trees for the Random Forest model, balancing complexity and accuracy.
-![OOB Error Plot for Optimal Number of Trees in Random Forest](plot/oob.png)
+![OOB Error Plot for Optimal Number of Trees in Random Forest](Plots/oob.png)
 
 **PCA Cluster Results**
 The PCA plot displays the clustering of samples based on their gene expression, reducing the high-dimensional data into principal components.
-![PCA Cluster Results](plot/pca.png)
+![PCA Cluster Results](Plots/pca.png)
 
 **Initial Volcano Plot of DESeq2 Results**
 This volcano plot highlights significantly differentially expressed genes, considering both fold changes and statistical significance.
-![Initial Volcano Plot of DESeq2 Results](plot/volcano_plot.png)
+![Initial Volcano Plot of DESeq2 Results](Plots/volcano_plot.png)
 
 **Top Genes Selected Lollipop Graph Based on Enrichment Results**
 The lollipop graph shows the top genes selected based on enrichment results, illustrating the significance and magnitude of their expression changes.
-![Top Genes Selected Lollipop Graph](plot/topgenes.png)
+![Top Genes Selected Lollipop Graph](Plots/topgenes.png)
 
 
 ## Contact
