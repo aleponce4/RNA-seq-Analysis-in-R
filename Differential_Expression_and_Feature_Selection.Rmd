@@ -1,6 +1,6 @@
 ---
 title: "RNA-Seq Analysis in Early-Stage Lung Adenocarcinoma"
-author: "Your Name"
+author: "Alejandro Ponce"
 date: "`r format(Sys.Date(), '%B %d, %Y')`"
 output:
   html_notebook:
@@ -224,10 +224,13 @@ Differential Expression Analysis
 dds <- DESeq(dds)
 ```
 
-Extract results
+Extract and save results
 
 ```{r}
 res <- results(dds, name = "tissue_Tumor_vs_normal")
+res_df <- as.data.frame(res)
+write.csv(res_df, file="Data/DESeq2_results.csv")
+
 ```
 
 #### Volcano Plot
@@ -352,7 +355,7 @@ print(summary_table)
 
 ```
 
-# Hierarchical​ ​clustering
+# Hierarchical clustering
 
 #### Compute clusters
 
@@ -461,7 +464,7 @@ loadings <- pca_res$var$coord
 
 # Identify the genes contributing most to PC1
 pc1_loadings <- loadings[, 1] # First principal component loadings
-top_pc1_genes <- names(sort(abs(pc1_loadings), decreasing = TRUE))[1:100] # Top 100 genes for PC1
+top_pc1_genes <- names(sort(abs(pc1_loadings), decreasing = TRUE))[1:200] # Top 100 genes for PC1
 
 ```
 
@@ -647,7 +650,7 @@ importance_df <- data.frame(Gene=rownames(importance_scores), Importance=importa
 importance_df_sorted <- importance_df[order(-importance_df$Importance), ]
 
 # Extract the top genes
-top_forest_genes <- head(importance_df_sorted, 100)
+top_forest_genes <- head(importance_df_sorted, 200)
 
 ```
 
@@ -655,33 +658,34 @@ top_forest_genes <- head(importance_df_sorted, 100)
 
 ```{r}
 
-# Create a new dataframe with random forest and PCA genes
+# Determine the maximum length among all gene lists
+max_length <- max(length(top_pc1_genes), length(top_forest_genes$Gene),
+                  length(cluster_2), length(cluster_4), length(cluster_5))
+
+# Create individual lists for PCA genes and Forest genes, extending them with NAs to match the longest list
+pca_genes_extended <- c(top_pc1_genes, rep(NA, max_length - length(top_pc1_genes)))
+forest_genes_extended <- c(top_forest_genes$Gene, rep(NA, max_length - length(top_forest_genes$Gene)))
+
+# Extend K-means clusters with NAs
+cluster_2_extended <- c(cluster_2, rep(NA, max_length - length(cluster_2)))
+cluster_4_extended <- c(cluster_4, rep(NA, max_length - length(cluster_4)))
+cluster_5_extended <- c(cluster_5, rep(NA, max_length - length(cluster_5)))
+
+# Create the final dataframe
 top_genes_df <- data.frame(
-  PCA_Genes = c(top_pc1_genes, rep(NA, max_length - length(top_pc1_genes))),
-  Forest_Genes = c(top_forest_genes, rep(NA, max_length - length(top_forest_genes)))
+  PCA_Genes = pca_genes_extended,
+  Forest_Genes = forest_genes_extended,
+  K_Means_Cluster_2 = cluster_2_extended,
+  K_Means_Cluster_4 = cluster_4_extended,
+  K_Means_Cluster_5 = cluster_5_extended
 )
 
-# K-means clusters genes
-# Subset the data for clusters 2, 4, and 5
-cluster_2 <- subset(gene_clusters, Cluster == 2)$Gene
-cluster_4 <- subset(gene_clusters, Cluster == 4)$Gene
-cluster_5 <- subset(gene_clusters, Cluster == 5)$Gene
-
-# Make all vectors the same length (fill with NA for shorter ones)
-cluster_2 <- c(cluster_2, rep(NA, max_length - length(cluster_2)))
-cluster_4 <- c(cluster_4, rep(NA, max_length - length(cluster_4)))
-cluster_5 <- c(cluster_5, rep(NA, max_length - length(cluster_5)))
-
-# Add new columns to the dataframe
-top_genes_df$K_Means_Cluster_2 <- cluster_2
-top_genes_df$K_Means_Cluster_4 <- cluster_4
-top_genes_df$K_Means_Cluster_5 <- cluster_5
-
-# remove rows with all NAs 
+# Remove rows where all elements are NA
 top_genes_df <- top_genes_df[rowSums(is.na(top_genes_df)) < ncol(top_genes_df), ]
 
-
+# Save the dataframe to a CSV file
 write.csv(top_genes_df, file = "Data/top_genes_df.csv", row.names = FALSE)
+
 
 ```
 

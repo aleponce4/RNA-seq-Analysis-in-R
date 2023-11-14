@@ -1,0 +1,287 @@
+---
+title: "Gene Annotation and Pathway Analysis"
+author: "Alejandro Ponce"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  html_notebook:
+    toc: true
+    toc_float: true
+    code_folding: "hide"
+    theme: united
+    highlight: tango
+---
+
+## Introduction
+
+Building on the RNA-Seq analysis conducted in the previous phase, this notebook focuses on the annotation and pathway analysis of selected gene groups. We will utilize two distinct sets of genes identified through different methods (such as cluster analysis, k-means, or inferential statistics) from our initial analysis. The aim is to enrich our understanding of these genes' biological significance and to explore the potential pathways they are involved in.
+
+## Objectives
+
+- Annotate two distinct groups of genes using DAVID and EnrichR (or a tool of your choice).
+- Interpret the annotation results and assess their relevance and accuracy.
+- Perform Gene Set Enrichment Analysis (GSEA) using either the R package or the Broad Institute's software and compare its statistical power against other methods.
+
+
+## Gene Selection
+
+In this analysis, we focus on two distinct groups of genes that were identified in our previous RNA-Seq analysis. These groups were selected based on different computational and statistical methods, each providing unique insights into gene expression patterns and their potential biological significance.
+
+Group 1: Top PCA Genes
+The first group of genes was selected based on Principal Component Analysis (PCA). PCA is a statistical technique used to identify patterns in data and to express the data in such a way as to highlight their similarities and differences. From the PCA, we extracted the genes that contributed most significantly to the variance in the dataset. These genes are hypothesized to play key roles in the underlying biological processes and conditions under study. They represent the top genes that emerged from the PCA, indicating their potential importance in differentiating between the conditions or treatments in our analysis. The specific genes in this group can be found in our saved results file, top_genes_df.csv, under the column "PCA_Genes".
+
+Group 2: Top Random Forest Genes
+The second group consists of genes identified through a Random Forest classifier, a machine learning method used for classification and regression. In our previous analysis, Random Forest was employed to determine the gene features that were most influential in classifying the samples into their respective groups. The top genes from this analysis are likely to be highly discriminative and may be crucial in understanding the distinct characteristics of each group. These genes are listed in the top_genes_df.csv file under the column "Forest_Genes".
+
+
+## Load necesary Libraries
+```{r}
+# Load libraries
+library(enrichR)
+library(ggplot2)
+library(stringr)
+library(fgsea)
+library(msigdbr)
+library(reshape2)
+library(gridExtra)
+```
+
+## Gene Annotation
+
+#### Load and inspect data
+```{r}
+# Load the CSV file
+top_genes_df <- read.csv("Data/top_genes_df.csv", stringsAsFactors = FALSE)
+
+# Inspect data
+head(top_genes_df)
+```
+
+#### Annotation with EnrichR
+
+Prepare Gene List
+```{r}
+# Extract the "PCA_Genes" and "Forest_Genes"
+pca_genes <- na.omit(top_genes_df$PCA_Genes)
+forest_genes <- na.omit(top_genes_df$Forest_Genes)
+
+pca_genes <- as.character(pca_genes)
+forest_genes <- as.character(forest_genes)
+```
+
+Perform Enrichment Analysis
+```{r}
+# Select databases
+databases <- c("GO_Biological_Process_2021", 
+               "GO_Cellular_Component_2021",
+               "GO_Molecular_Function_2021",
+               "KEGG_2021_Human")
+
+# Enrichment for PCA Genes
+enrichment_results_pca <- enrichr(pca_genes, databases)
+
+# Enrichment for Forest Genes
+enrichment_results_forest <- enrichr(forest_genes, databases)
+
+```
+
+### Analysis of Annotation Results
+
+
+```{r}
+
+# 1. Random Forest
+# Sort the entire dataframe by Combined Score in descending order
+sorted_by_score <- enrichment_results_forest[[1]][order(-enrichment_results_forest[[1]]$Combined.Score), ]
+# Extract the top 10 terms
+top_10_terms_by_score <- head(sorted_by_score, 20)
+# Count the number of genes for each term
+top_10_terms_by_score$GeneCount <- sapply(strsplit(top_10_terms_by_score$Genes, ";"), length)
+
+# Remove GO identifiers 
+top_10_terms_by_score$Term <- gsub("\\s*\\(GO:[0-9]+\\)", "", top_10_terms_by_score$Term)
+# wrap text
+top_10_terms_by_score$ShortTerm <- str_wrap(top_10_terms_by_score$Term, width = 50)
+
+# Create the plot
+ggplot(top_10_terms_by_score, aes(x=reorder(ShortTerm, Combined.Score), y=Combined.Score)) +
+  geom_segment(aes(x=reorder(ShortTerm, Combined.Score), 
+                   xend=reorder(ShortTerm, Combined.Score), 
+                   y=0, yend=Combined.Score, color=P.value), linewidth=0.7) +  
+  geom_point(aes(color=P.value, size=GeneCount), shape=16) +
+  scale_color_gradient(low = "blue", high = "red") +
+  scale_size(range = c(2, 6),guide = "none", breaks = seq(1, max(top_10_terms_by_score$GeneCount), by = 1)) +
+  coord_flip() +
+  theme_gray() +
+  theme(axis.text.y = element_text(size = 8)) +
+  xlab("Enriched Terms") +
+  ylab("Combined Score") +
+  ggtitle("Top 20 Enriched Terms in RandomForest Genes") +
+  labs(color = "P-value")
+
+
+# 1. PCA
+# Sort the PCA enrichment results dataframe by Combined Score in descending order
+sorted_by_score_pca <- enrichment_results_pca[[1]][order(-enrichment_results_pca[[1]]$Combined.Score), ]
+# Extract the top 10 terms from the sorted PCA results
+top_10_terms_by_score_pca <- head(sorted_by_score_pca, 20)
+# Count the number of genes for each term in the PCA results
+top_10_terms_by_score_pca$GeneCount <- sapply(strsplit(top_10_terms_by_score_pca$Genes, ";"), length)
+# Remove GO identifiers from PCA terms
+top_10_terms_by_score_pca$Term <- gsub("\\s*\\(GO:[0-9]+\\)", "", top_10_terms_by_score_pca$Term)
+# Wrap text for PCA terms
+top_10_terms_by_score_pca$ShortTerm <- str_wrap(top_10_terms_by_score_pca$Term, width = 50)
+
+# Create the plot for PCA results
+ggplot(top_10_terms_by_score_pca, aes(x=reorder(ShortTerm, Combined.Score), y=Combined.Score)) +
+  geom_segment(aes(x=reorder(ShortTerm, Combined.Score), 
+                   xend=reorder(ShortTerm, Combined.Score), 
+                   y=0, yend=Combined.Score, color=P.value), linewidth=0.7) +  
+  geom_point(aes(color=P.value, size=GeneCount), shape=16) +
+  scale_color_gradient(low = "blue", high = "red") +
+  scale_size(range = c(2, 6), guide = "none", breaks = seq(1, max(top_10_terms_by_score_pca$GeneCount), by = 1)) +
+  coord_flip() +
+  theme_gray() +
+  theme(axis.text.y = element_text(size = 8)) +
+  xlab("Enriched Terms") +
+  ylab("Combined Score") +
+  ggtitle("Top 20 Enriched Terms in PCA Genes") +
+  labs(color = "P-value")
+
+
+```
+
+
+
+
+## Gene Set Enrichment Analysis (GSEA)
+
+Load and prepare data
+```{r}
+# Load the DESeq2 results
+deseq2_results <- read.csv("Data/DESeq2_results.csv")
+
+# Create the ranked list of genes and set gene names as the names of the vector
+ranked_genes <- deseq2_results$log2FoldChange
+names(ranked_genes) <- deseq2_results$X
+
+head(ranked_genes)
+```
+
+Get Gene Sets
+```{r}
+# Get MSigDB gene sets for Homo sapiens
+msigdbr_df <- msigdbr(species = "Homo sapiens", category = "C2")  # C2: curated gene sets
+
+# divide data into a list of gene sets
+gene_sets = split(x = msigdbr_df$gene_symbol, f = msigdbr_df$gs_name)
+
+```
+
+
+Run GSEA
+```{r warning=FALSE}
+# Run GSEA
+fgsea_results <- fgsea(pathways = gene_sets, stats = ranked_genes)
+```
+
+Plot results
+```{r fig.height=5, fig.width=9}
+# Sort the GSEA results dataframe by NES or p-value in descending order
+sorted_gsea_results <- fgsea_results[order(-abs(fgsea_results$NES)), ]
+
+# Extract the top 20 pathways from the sorted GSEA results
+top_gsea_results <- head(sorted_gsea_results, 20)
+# Wrap labels
+top_gsea_results$ShortPathway <- str_wrap(top_gsea_results$pathway, width = 10) 
+
+
+# Create the plot
+ggplot(top_gsea_results, aes(x = reorder(ShortPathway, ES), y = ES)) +
+    geom_segment(aes(xend = reorder(ShortPathway, ES), y = 0, yend = ES, color = padj), size = 0.7) +
+    geom_point(aes(color = padj, size = size)) +
+    scale_color_gradient(low = "blue", high = "red") +
+    scale_size(range = c(2, 6), guide = "none") +
+    coord_flip() +
+    theme_minimal() +
+    theme(axis.text.y = element_text(size = 6)) +
+    xlab("Pathways") +
+    ylab("Enrichment Score") +
+    ggtitle("Top 20 Enriched Pathways in GSEA") +
+    labs(color = "Adjusted P-value")
+
+```
+
+
+## Comparison of Statistical Power
+
+Create new df to compare results
+```{r}
+pca_terms <- sorted_by_score_pca[, c("Term", "Adjusted.P.value")]
+gsea_terms <- sorted_gsea_results[, c("pathway", "padj")]
+forest_terms <- sorted_by_score[, c("Term", "Adjusted.P.value")]
+
+#Rename columns
+names(pca_terms) <- c("PCA_Term", "PCA_Adj_Pval")
+names(gsea_terms) <- c("GSEA_Pathway", "GSEA_Adj_Pval")
+names(forest_terms) <- c("Forest_Term", "Forest_Adj_Pval")
+
+#combine
+max_rows <- max(nrow(pca_terms), nrow(gsea_terms), nrow(forest_terms))
+pca_terms[max_rows, ] <- NA
+gsea_terms[max_rows, ] <- NA
+forest_terms[max_rows, ] <- NA
+combined_df <- cbind(pca_terms, gsea_terms, forest_terms)
+
+```
+
+Histogram
+```{r message=FALSE, warning=FALSE}
+# Convert the data frame to long format for ggplot
+long_df <- melt(combined_df, 
+                measure.vars = c("PCA_Adj_Pval", "GSEA_Adj_Pval", "Forest_Adj_Pval"),
+                variable.name = "Method", 
+                value.name = "Adj_Pval")
+
+# Simplify Method names for readability
+long_df$Method <- gsub("_Adj_Pval", "", long_df$Method)
+
+# Filter data for significance and create the summary table
+pvalue_threshold <- 0.05
+pca_terms_significant <- pca_terms[!is.na(pca_terms$PCA_Adj_Pval) & pca_terms$PCA_Adj_Pval <= pvalue_threshold, ]
+gsea_terms_significant <- gsea_terms[!is.na(gsea_terms$GSEA_Adj_Pval) & gsea_terms$GSEA_Adj_Pval <= pvalue_threshold, ]
+forest_terms_significant <- forest_terms[!is.na(forest_terms$Forest_Adj_Pval) & forest_terms$Forest_Adj_Pval <= pvalue_threshold, ]
+
+summary_table <- data.frame(
+  Method = c("PCA + EnrichR", "GSEA", "Random Forest + EnrichR"),
+  Significant_Pathways = c(nrow(pca_terms_significant),
+                           nrow(gsea_terms_significant),
+                           nrow(forest_terms_significant))
+)
+
+# Print the summary table
+print(summary_table)
+
+# Histogram
+histogram_plot_facet_vertical <- ggplot(long_df, aes(x = Adj_Pval, fill = Method)) +
+  geom_histogram(aes(y = ..density..), alpha = 0.5, bins = 100) +
+  scale_fill_brewer(palette = "Set1") +
+  facet_wrap(~ Method, nrow = 3) +  # Arrange facets vertically
+  theme_grey() +
+  labs(x = "Adjusted P-Value", y = "Density", fill = "Method") +
+  ggtitle("Distribution of P-Values ")
+
+print(histogram_plot_facet_vertical)
+
+
+```
+
+
+
+
+## Discussion
+
+- **Overall Insights**: Summarize the key findings from the gene annotations and GSEA.
+- **Relevance to Initial Research Goals**: Reflect on how these findings contribute to the broader research goals or hypotheses set out in the initial analysis.
+- **Future Directions**: Suggest any potential future analyses or experimental validations that could build on these findings.
+
+
