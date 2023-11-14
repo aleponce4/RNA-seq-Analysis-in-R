@@ -14,6 +14,8 @@ The RNA-Seq analysis pipeline is implemented in R Markdown and consists of the f
 6. **Principal Component Analysis (PCA)**: Reducing dimensionality to visualize the data.
 7. **K-Means Clustering**: Identifying gene clusters based on expression profiles.
 8. **Random Forest Analysis**: Utilizing this machine learning technique for feature selection.
+9. **Gene Set Enrichment Analysis (GSEA): Understanding the biological pathways and processes using the fgsea package.
+10. **Statistical Analysis and Visualization: Including PCA plots, lollipop plots, and comparison of P-value distributions across methods.
 
 ## Files and Directories
 
