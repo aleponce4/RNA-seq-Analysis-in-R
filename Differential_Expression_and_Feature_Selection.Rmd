@@ -210,6 +210,7 @@ metadata_df$tissue <- as.factor(metadata_df$tissue)
 rownames(filtered_counts_data) <- filtered_counts_data[, 1]
 # Then remove this column from the data
 filtered_counts_data <- filtered_counts_data[, -1]
+write.csv(filtered_counts_data, file="Data/filtered_counts_data.csv")
 
 # create the DESeq2 object
 dds <- DESeqDataSetFromMatrix(countData = filtered_counts_data, colData = metadata_df, design = ~ tissue)
@@ -222,14 +223,22 @@ Differential Expression Analysis
 
 ```{r}
 dds <- DESeq(dds)
+
 ```
 
 Extract and save results
 
 ```{r}
+# Normalize the counts using the DESeq function
+dds_N <- DESeq(dds)
+# Extract the normalized counts
+normalized_counts <- counts(dds_N, normalized = TRUE)
+# Save the normalized counts to a CSV file
+write.csv(normalized_counts, "filtered_counts_data", row.names = TRUE)
+
+# Extract results
 res <- results(dds, name = "tissue_Tumor_vs_normal")
 res_df <- as.data.frame(res)
-write.csv(res_df, file="Data/DESeq2_results.csv")
 
 ```
 
