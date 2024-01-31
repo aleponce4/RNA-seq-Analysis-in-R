@@ -698,6 +698,19 @@ write.csv(clusters_df, file = "Data/clusters_genes_df.csv", row.names = FALSE)
 ```
 
 #### Inspect Fold Change of selected genes
+```{r}
+# Convert top_pc1_genes vector to a dataframe
+top_pc1_genes_df <- data.frame(Gene = top_pc1_genes)
+
+# Create a column to indicate the source of genes
+top_forest_genes$Source <- 'Forest_Genes'
+top_pc1_genes_df$Source <- 'PCA_Genes'
+
+# Combine the gene lists
+top_genes_df <- rbind(data.frame(Gene = top_forest_genes$Gene, Source = top_forest_genes$Source),
+                      data.frame(Gene = top_pc1_genes_df$Gene, Source = top_pc1_genes_df$Source))
+```
+
 
 ```{r}
 # Combine all genes from all columns into one vector
